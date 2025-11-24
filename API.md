@@ -158,3 +158,20 @@ Access an uploaded file.
 - **URL:** `/uploads/<filename>`
 - **Method:** `GET`
 - **Example:** `http://localhost:8080/uploads/1700956800123.jpg`
+
+### 9. Search Uploaded Image (Google Lens)
+Uploads an image and searches for products using Google Lens (via SerpApi).
+
+- **URL:** `/api/search/image`
+- **Method:** `POST`
+- **Body:** `multipart/form-data`
+  - `file`: The image file to upload (Allowed extensions: png, jpg, jpeg, gif).
+- **Success Response:**
+  - **Code:** 200 OK
+  - **Content:** Returns the raw JSON response from SerpApi (Google Lens results).
+- **Requirements:**
+  - `SERPAPI_API_KEY` must be set in `.env`.
+  - The server must be publicly accessible (e.g., via ngrok) for SerpApi to access the uploaded image URL.
+- **Error Responses:**
+  - 400 Bad Request: No file selected or invalid file type.
+  - 500 Internal Server Error: Search failed or API key missing.

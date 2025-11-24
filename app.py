@@ -268,6 +268,59 @@ def cleanup_uploads():
                 print(f'Failed to delete {file_path}. Reason: {e}')
         print("Uploads folder cleaned up.")
 
+@app.route('/api/search/image', methods=['POST'])
+def search_image_route():
+    """Search using uploaded image via Google Lens"""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+        
+    if file and allowed_file(file.filename):
+        # Generate unique filename using timestamp
+        original_filename = secure_filename(file.filename)
+        extension = original_filename.rsplit('.', 1)[1].lower()
+        filename = f"{int(time.time() * 1000)}.{extension}"
+        
+        # Ensure upload directory exists
+        if not os.path.exists(app.config['UPLOAD_FOLDER']):
+            os.makedirs(app.config['UPLOAD_FOLDER'])
+            
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(file_path)
+        
+        # Construct public URL (Note: This requires the server to be publicly accessible)
+        # If running locally, you might need a tunnel like ngrok
+        image_url = request.host_url + 'uploads/' + filename
+        
+        # Search using SerpApi
+        if not os.environ.get("SERPAPI_API_KEY"):
+            return jsonify({"error": "SERPAPI_API_KEY not set in environment"}), 500
+
+        try:
+            params = {
+              "engine": "google_lens",
+              "url": image_url,
+              "type": "products",
+              "api_key": os.environ.get("SERPAPI_API_KEY")
+            }
+
+            search = GoogleSearch(params)
+            results = search.get_dict()
+            
+            if "error" in results:
+                 return jsonify(results), 400
+                 
+            return jsonify(results), 200
+            
+        except Exception as e:
+            return jsonify({"error": f"Search failed: {str(e)}"}), 500
+        
+    return jsonify({"error": "File type not allowed. Only images are allowed."}), 400
+
 if __name__ == '__main__':
     # Create uploads folder if it doesn't exist
     if not os.path.exists(UPLOAD_FOLDER):
