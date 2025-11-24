@@ -1,18 +1,34 @@
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from serpapi import GoogleSearch
 from dotenv import load_dotenv
+from werkzeug.utils import secure_filename
+from flask_apscheduler import APScheduler
 import instaloader
 import os
 import tempfile
 import re
 import io
 import base64
+import shutil
+import time
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+# Configure upload folder
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Initialize scheduler
+scheduler = APScheduler()
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 L = instaloader.Instaloader(
             download_videos=False,
@@ -199,5 +215,67 @@ def extract_shortcode(url):
             return match.group(1)
     return None
 
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    """Upload file endpoint"""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+        
+    if file and allowed_file(file.filename):
+        # Generate unique filename using timestamp
+        original_filename = secure_filename(file.filename)
+        extension = original_filename.rsplit('.', 1)[1].lower()
+        filename = f"{int(time.time() * 1000)}.{extension}"
+        
+        # Ensure upload directory exists
+        if not os.path.exists(app.config['UPLOAD_FOLDER']):
+            os.makedirs(app.config['UPLOAD_FOLDER'])
+            
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(file_path)
+        
+        return jsonify({
+            "message": "File uploaded successfully", 
+            "filename": filename,
+            "path": file_path
+        }), 201
+        
+    return jsonify({"error": "File type not allowed. Only images are allowed."}), 400
+
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    """Serve uploaded files"""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+def cleanup_uploads():
+    """Delete all files in uploads folder"""
+    folder = app.config['UPLOAD_FOLDER']
+    if os.path.exists(folder):
+        print(f"Cleaning up uploads folder: {folder}")
+        for filename in os.listdir(folder):
+            file_path = os.path.join(folder, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f'Failed to delete {file_path}. Reason: {e}')
+        print("Uploads folder cleaned up.")
+
 if __name__ == '__main__':
+    # Create uploads folder if it doesn't exist
+    if not os.path.exists(UPLOAD_FOLDER):
+        os.makedirs(UPLOAD_FOLDER)
+
+    # Schedule cleanup job to run every day at 12:00 AM
+    scheduler.add_job(id='cleanup_task', func=cleanup_uploads, trigger='cron', hour=0, minute=0)
+    scheduler.init_app(app)
+    scheduler.start()
+    
     app.run(debug=True, host='0.0.0.0', port=8080)
