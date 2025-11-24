@@ -1,5 +1,7 @@
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
+from serpapi import GoogleSearch
+from dotenv import load_dotenv
 import instaloader
 import os
 import tempfile
@@ -7,8 +9,28 @@ import re
 import io
 import base64
 
+load_dotenv()
+
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+L = instaloader.Instaloader(
+            download_videos=False,
+            download_video_thumbnails=False,
+            download_comments=False,
+            save_metadata=False,
+            compress_json=False
+        )
+
+username = os.environ.get("INSTA_USERNAME")
+if username:
+    L.load_session_from_file(username=os.environ.get("INSTA_USERNAME"), filename=os.environ.get("INSTA_SESSIONFILE"))
+
+    if getattr(L.context, "is_logged_in", False):
+        print("Instaloader login successful for user", username)
+    else:
+        print("Instaloader login failed for user", username)
+
 
 @app.route('/')
 def home():
@@ -26,35 +48,6 @@ def health_check():
         "status": "healthy",
         "timestamp": "2025-11-23"
     })
-
-@app.route('/api/data', methods=['GET'])
-def get_data():
-    """Get data endpoint"""
-    sample_data = [
-        {"id": 1, "name": "Item 1", "description": "First item"},
-        {"id": 2, "name": "Item 2", "description": "Second item"},
-        {"id": 3, "name": "Item 3", "description": "Third item"}
-    ]
-    return jsonify({
-        "data": sample_data,
-        "count": len(sample_data)
-    })
-
-@app.route('/api/data', methods=['POST'])
-def create_data():
-    """Create new data endpoint"""
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
-    
-    # In a real app, you'd save this to a database
-    response_data = {
-        "message": "Data created successfully",
-        "received_data": data
-    }
-    
-    return jsonify(response_data), 201
 
 @app.route('/api/instagram/download', methods=['POST'])
 def download_instagram_image():
@@ -77,13 +70,6 @@ def download_instagram_image():
             return jsonify({"error": "Could not extract post ID from URL"}), 400
         
         # Download image using instaloader
-        L = instaloader.Instaloader(
-            download_videos=False,
-            download_video_thumbnails=False,
-            download_comments=False,
-            save_metadata=False,
-            compress_json=False
-        )
        
         # Download the post
         post = instaloader.Post.from_shortcode(L.context, shortcode)
@@ -116,6 +102,75 @@ def download_instagram_image():
         return jsonify({"error": "Login required to access this content"}), 401
     except Exception as e:
         return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+@app.route('/api/search/instagram', methods=['POST'])
+def search_instagram_route():
+    """Search Instagram image using Google Lens"""
+    data = request.get_json()
+    
+    if not data or 'instagram_url' not in data:
+        return jsonify({"error": "Instagram URL is required"}), 400
+    
+    result = search_instagram(data['instagram_url'])
+    
+    if "error" in result and "search_metadata" not in result:
+         return jsonify(result), 400
+        
+    return jsonify(result), 200
+
+def search_instagram(instagram_url):
+    """
+    Get image of a post from instagram and pass it to Google Lens search
+    """
+    try:
+        # Validate Instagram URL
+        if not is_valid_instagram_url(instagram_url):
+            return {"error": "Invalid Instagram URL"}
+        
+        # Extract shortcode from URL
+        shortcode = extract_shortcode(instagram_url)
+        if not shortcode:
+            return {"error": "Could not extract post ID from URL"}
+        
+        # Download image using instaloader
+        L = instaloader.Instaloader(
+            download_videos=False,
+            download_video_thumbnails=False,
+            download_comments=False,
+            save_metadata=False,
+            compress_json=False
+        )
+       
+        # Get the post
+        post = instaloader.Post.from_shortcode(L.context, shortcode)
+        
+        # Get the image URL
+        image_url = post.url
+        
+        if not image_url:
+             return {"error": "Could not retrieve image from Instagram post"}
+
+        # Search using SerpApi
+        if not os.environ.get("SERPAPI_API_KEY"):
+            return {"error": "SERPAPI_API_KEY not set in environment"}
+
+        params = {
+          "engine": "google_lens",
+          "url": image_url,
+          "type": "products",
+          "api_key": os.environ.get("SERPAPI_API_KEY")
+        }
+
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        return results
+
+    except instaloader.exceptions.PostUnavailableException:
+        return {"error": "Instagram post is not available or private"}
+    except instaloader.exceptions.LoginRequiredException:
+        return {"error": "Login required to access this content"}
+    except Exception as e:
+        return {"error": f"Error: {str(e)}"}
 
 def is_valid_instagram_url(url):
     """Validate if the URL is a valid Instagram URL"""
