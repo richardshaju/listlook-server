@@ -326,8 +326,8 @@ if __name__ == '__main__':
     if not os.path.exists(UPLOAD_FOLDER):
         os.makedirs(UPLOAD_FOLDER)
 
-    # Schedule cleanup job to run every day at 12:00 AM
-    scheduler.add_job(id='cleanup_task', func=cleanup_uploads, trigger='cron', hour=0, minute=0)
+    # Schedule cleanup job to run on the 26th of every month at 12:00 AM
+    scheduler.add_job(id='cleanup_task', func=cleanup_uploads, trigger='cron', day=26, hour=0, minute=0)
     scheduler.init_app(app)
     scheduler.start()
     
